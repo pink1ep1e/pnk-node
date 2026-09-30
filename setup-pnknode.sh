@@ -196,7 +196,7 @@ else
 fi
 
 # ── target dir ───────────────────────────────────────────────────
-BASE_DIR="/opt/pnknode"
+BASE_DIR="/opt/remnanode"
 TARGET_DIR="$BASE_DIR"
 IDX=1
 while [[ -d "$TARGET_DIR" ]]; do
