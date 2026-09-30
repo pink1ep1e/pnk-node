@@ -32,6 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/pink1ep1e/pnk-node/refs/heads/main/
 
 - Self-steal: **Caddy** или **Nginx** для Reality dest
 - Nginx: proxy protocol, сертификаты Cloudflare DNS-01 / HTTP-01 / Gcore DNS-01
+- CDN: nginx + Let's Encrypt, `/api/uploadFile/` → `127.0.0.1:4443`
 - WARP-NATIVE
 - BBR оптимизация
 
@@ -50,6 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/pink1ep1e/pnk-node/refs/heads/main/
 | 7 | Self-steal (Caddy / Nginx) |
 | 8 | BBR |
 | 9 | WARP-NATIVE |
+| 10 | CDN (nginx + LE) |
 | 0 | Выход |
 
 После установки: `pnk-node` или `sudo bash /opt/pnk-node-suite/menu.sh`

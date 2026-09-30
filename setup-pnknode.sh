@@ -571,25 +571,65 @@ for kv in \
   fi
 done
 
-# ── UFW ──────────────────────────────────────────────────────────
-if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
-  echo
-  pnk_section "UFW активен"
-  pnk_muted "API ${BIND_IP}:${NODE_PORT}/tcp"
-  pnk_muted "Xray ${BIND_IP}:${XRAY_PORT_HTTPS},${XRAY_PORT_ALT} tcp/udp"
-  if pnk_confirm "Добавить точечные UFW-правила?" "Y"; then
-    ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${NODE_PORT}" proto tcp comment "pnk-node ${NODE_NAME} api tcp ${NODE_PORT}" >/dev/null 2>&1 || true
-    ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_HTTPS}" proto tcp comment "pnk-node ${NODE_NAME} xray tcp ${XRAY_PORT_HTTPS}" >/dev/null 2>&1 || true
-    ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_HTTPS}" proto udp comment "pnk-node ${NODE_NAME} xray udp ${XRAY_PORT_HTTPS}" >/dev/null 2>&1 || true
-    ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_ALT}" proto tcp comment "pnk-node ${NODE_NAME} xray tcp ${XRAY_PORT_ALT}" >/dev/null 2>&1 || true
-    ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_ALT}" proto udp comment "pnk-node ${NODE_NAME} xray udp ${XRAY_PORT_ALT}" >/dev/null 2>&1 || true
-    if [[ -n "${DOCKER_NET_SUBNET:-}" && -n "${DOCKER_BRIDGE_IFACE:-}" ]]; then
-      ufw route allow in on "${DOCKER_BRIDGE_IFACE}" out on "${SELECTED_IFACE}" from "${DOCKER_NET_SUBNET}" to any comment "pnk-node ${NODE_NAME} routed egress" >/dev/null 2>&1 || true
-    fi
-    pnk_ok "UFW правила добавлены"
-  else
-    pnk_muted "UFW пропущен"
+# ── UFW · panel IP → API port ───────────────────────────────────
+echo
+pnk_section "UFW · доступ панели к API :${NODE_PORT}"
+pnk_muted "Только IP панели сможет стучаться на ${BIND_IP}:${NODE_PORT}/tcp"
+PANEL_IP=""
+while true; do
+  pnk_ask "IP панели Remnawave" PANEL_IP
+  if [[ "$PANEL_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    break
   fi
+  pnk_err "Нужен IPv4, например 203.0.113.10"
+done
+pnk_ok "Панель ${TEAL}${PANEL_IP}${NC} → :${NODE_PORT}"
+
+if ! command -v ufw &>/dev/null; then
+  if command -v apt-get &>/dev/null; then
+    pnk_info "Ставлю ufw..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y >/dev/null
+    apt-get install -y ufw >/dev/null
+  else
+    pnk_warn "ufw не найден — правило не добавлено"
+  fi
+fi
+
+if command -v ufw &>/dev/null; then
+  if ! ufw status | grep -q "Status: active"; then
+    SSH_PORT="$(ss -tnlp 2>/dev/null | grep -i sshd | awk '{print $4}' | sed 's/.*://g' | sort -u | head -n1 || true)"
+    SSH_PORT="${SSH_PORT:-22}"
+    ufw allow "${SSH_PORT}/tcp" comment 'SSH Port' >/dev/null 2>&1 || true
+    pnk_info "Включаю UFW (SSH :${SSH_PORT} уже разрешён)..."
+    ufw --force enable >/dev/null
+  fi
+  # API только с IP панели
+  ufw allow from "${PANEL_IP}" to "${BIND_IP}" port "${NODE_PORT}" proto tcp \
+    comment "pnk-node ${NODE_NAME} api from panel ${PANEL_IP}" >/dev/null 2>&1 || true
+  # Xray — публично (клиенты)
+  ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_HTTPS}" proto tcp \
+    comment "pnk-node ${NODE_NAME} xray tcp ${XRAY_PORT_HTTPS}" >/dev/null 2>&1 || true
+  ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_HTTPS}" proto udp \
+    comment "pnk-node ${NODE_NAME} xray udp ${XRAY_PORT_HTTPS}" >/dev/null 2>&1 || true
+  ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_ALT}" proto tcp \
+    comment "pnk-node ${NODE_NAME} xray tcp ${XRAY_PORT_ALT}" >/dev/null 2>&1 || true
+  ufw allow in on "${SELECTED_IFACE}" to "${BIND_IP}" port "${XRAY_PORT_ALT}" proto udp \
+    comment "pnk-node ${NODE_NAME} xray udp ${XRAY_PORT_ALT}" >/dev/null 2>&1 || true
+  if [[ -n "${DOCKER_NET_SUBNET:-}" && -n "${DOCKER_BRIDGE_IFACE:-}" ]]; then
+    ufw route allow in on "${DOCKER_BRIDGE_IFACE}" out on "${SELECTED_IFACE}" from "${DOCKER_NET_SUBNET}" to any \
+      comment "pnk-node ${NODE_NAME} routed egress" >/dev/null 2>&1 || true
+  fi
+  pnk_ok "UFW: API только с ${PANEL_IP}, Xray открыт"
+else
+  pnk_warn "UFW недоступен — сохрани IP панели в .env вручную при необходимости"
+fi
+
+# persist panel IP
+if grep -q '^PANEL_IP=' .env 2>/dev/null; then
+  sed -i "s#^PANEL_IP=.*#PANEL_IP=${PANEL_IP}#" .env 2>/dev/null || true
+else
+  echo "PANEL_IP=${PANEL_IP}" >> .env
 fi
 
 # ── finalize ─────────────────────────────────────────────────────
@@ -608,6 +648,7 @@ if [[ -n "${EXTERNAL_IP_DETECTED:-}" ]]; then
 else
   pnk_box_line "    ${MUTED}url${NC}  ${TEAL}${BIND_IP}:${NODE_PORT}${NC}"
 fi
+pnk_box_line "    ${MUTED}ufw${NC}  :${NODE_PORT} ← ${PANEL_IP}"
 pnk_box_bottom 52
 
 if pnk_confirm "Показать логи сейчас?" "Y"; then

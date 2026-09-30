@@ -92,8 +92,31 @@ SSH_PORT="${SSH_PORT:-22}"
 ufw allow "${SSH_PORT}/tcp" comment 'SSH Port' >/dev/null 2>&1 || true
 pnk_ok "SSH :${SSH_PORT}"
 
-ufw allow "${NODE_PORT}/tcp" comment 'pnk-node API' >/dev/null 2>&1 || true
-pnk_ok "Node API :${NODE_PORT}"
+# API только с IP панели
+PANEL_IP=""
+for d in /opt/pnknode* /opt/remnanode*; do
+  if [[ -f "$d/.env" ]]; then
+    PANEL_IP="$(grep -E '^PANEL_IP=' "$d/.env" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+    [[ -n "$PANEL_IP" ]] && break
+  fi
+done
+echo
+pnk_muted "Порт API :${NODE_PORT} открываем только для IP панели"
+while true; do
+  pnk_ask "IP панели Remnawave" PANEL_IP "${PANEL_IP}"
+  if [[ "$PANEL_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    break
+  fi
+  pnk_err "Нужен IPv4, например 203.0.113.10"
+done
+
+# снять старое «открыто всем» правило на API, если было
+ufw status numbered 2>/dev/null | grep -E "${NODE_PORT}/tcp" | grep -vi "from" \
+  | grep -oE '\[[[:space:]]*[0-9]+\]' | tr -d '[] ' | sort -rn \
+  | while read -r n; do ufw --force delete "$n" >/dev/null 2>&1 || true; done
+
+ufw allow from "${PANEL_IP}" to any port "${NODE_PORT}" proto tcp comment 'pnk-node API from panel' >/dev/null 2>&1 || true
+pnk_ok "Node API :${NODE_PORT} ← ${PANEL_IP}"
 
 ufw allow 443/tcp comment 'HTTPS' >/dev/null 2>&1 || true
 ufw allow 8443/tcp comment 'HTTPS alt' >/dev/null 2>&1 || true
@@ -104,7 +127,7 @@ echo
 pnk_box_top "SECURE" 52
 pnk_box_line "${OK}${G_OK}${NC}  UFW active"
 pnk_box_line "    SSH   ${SSH_PORT}"
-pnk_box_line "    Node  ${NODE_PORT}"
+pnk_box_line "    Node  ${NODE_PORT} ← ${PANEL_IP}"
 pnk_box_line "    TLS   443, 8443, 4443"
 pnk_box_bottom 52
 pnk_footer
