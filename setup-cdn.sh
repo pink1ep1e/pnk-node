@@ -33,7 +33,7 @@ pnk_kv "domain" "$DOMAIN"
 pnk_kv "backend" "127.0.0.1:${BACKEND_PORT}"
 
 # ── packages ─────────────────────────────────────────────────────
-pnk_step 1 6 "Пакеты"
+pnk_step 1 7 "Пакеты"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y >/dev/null
 apt-get install -y curl certbot dnsutils >/dev/null
@@ -52,7 +52,7 @@ systemctl start docker >/dev/null 2>&1 || true
 pnk_ok "Docker готов"
 
 # ── conflicts ────────────────────────────────────────────────────
-pnk_step 2 6 "Конфликты на 80/443"
+pnk_step 2 7 "Конфликты на 80/443"
 if command -v nginx >/dev/null 2>&1 || systemctl list-unit-files 2>/dev/null | grep -q '^nginx\.service'; then
   pnk_warn "Сношу системный nginx (конфликт с CDN)"
   systemctl stop nginx 2>/dev/null || true
@@ -77,7 +77,7 @@ else
 fi
 
 # ── DNS ──────────────────────────────────────────────────────────
-pnk_step 3 6 "DNS"
+pnk_step 3 7 "DNS"
 RESOLVED=""
 if command -v dig >/dev/null 2>&1; then
   RESOLVED="$(dig +short "$DOMAIN" A 2>/dev/null | head -1 || true)"
@@ -94,8 +94,32 @@ if ! pnk_confirm "DNS ок, выпускаем сертификат?" "Y"; then
   exit 0
 fi
 
+# ── UFW 80/443 (до certbot) ──────────────────────────────────────
+pnk_step 4 7 "UFW · 80 и 443"
+if ! command -v ufw &>/dev/null; then
+  if command -v apt-get &>/dev/null; then
+    pnk_info "Ставлю ufw..."
+    apt-get install -y ufw >/dev/null
+  else
+    pnk_warn "ufw не найден — порты открой вручную"
+  fi
+fi
+if command -v ufw &>/dev/null; then
+  if ! ufw status 2>/dev/null | grep -q "Status: active"; then
+    SSH_PORT="$(ss -tnlp 2>/dev/null | grep -i sshd | awk '{print $4}' | sed 's/.*://g' | sort -u | head -n1 || true)"
+    SSH_PORT="${SSH_PORT:-22}"
+    ufw allow "${SSH_PORT}/tcp" comment 'SSH Port' >/dev/null 2>&1 || true
+    ufw --force enable >/dev/null
+    pnk_ok "UFW включён (SSH :${SSH_PORT})"
+  fi
+  ufw allow 80/tcp comment 'pnk-node CDN http' >/dev/null 2>&1 || true
+  ufw allow 443/tcp comment 'pnk-node CDN https' >/dev/null 2>&1 || true
+  ufw reload >/dev/null 2>&1 || true
+  pnk_ok "UFW: разрешены 80/tcp и 443/tcp"
+fi
+
 # ── certbot ──────────────────────────────────────────────────────
-pnk_step 4 6 "Let's Encrypt"
+pnk_step 5 7 "Let's Encrypt"
 certbot certonly --standalone -d "$DOMAIN" \
   --non-interactive --agree-tos -m "$LE_EMAIL" \
   --preferred-challenges http \
@@ -103,15 +127,8 @@ certbot certonly --standalone -d "$DOMAIN" \
 [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]] || { pnk_err "Нет fullchain.pem"; exit 1; }
 pnk_ok "Сертификат /etc/letsencrypt/live/${DOMAIN}/"
 
-# UFW 80/443 if active
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-  ufw allow 80/tcp comment 'pnk-node CDN http' >/dev/null 2>&1 || true
-  ufw allow 443/tcp comment 'pnk-node CDN https' >/dev/null 2>&1 || true
-  pnk_ok "UFW: 80/443"
-fi
-
 # ── files ────────────────────────────────────────────────────────
-pnk_step 5 6 "Конфиг /opt/cdn-nginx"
+pnk_step 6 7 "Конфиг /opt/cdn-nginx"
 mkdir -p "${CDN_DIR}/html"
 cd "${CDN_DIR}"
 
@@ -186,7 +203,7 @@ echo "MANAGED_BY=pnk-node" >> .env
 pnk_ok "Файлы записаны"
 
 # ── start ────────────────────────────────────────────────────────
-pnk_step 6 6 "Запуск"
+pnk_step 7 7 "Запуск"
 sleep 2
 docker compose up -d
 sleep 3
@@ -208,5 +225,6 @@ pnk_box_line "    ${MUTED}dir${NC}     ${CDN_DIR}"
 pnk_box_line "    ${MUTED}/${NC}       HTTP ${ROOT_CODE}  (ожидаем 200)"
 pnk_box_line "    ${MUTED}/api${NC}    HTTP ${API_CODE}  (502 норм, если xray ещё нет)"
 pnk_box_line "    ${MUTED}proxy${NC}  → 127.0.0.1:${BACKEND_PORT}"
+pnk_box_line "    ${MUTED}ufw${NC}    80/tcp · 443/tcp"
 pnk_box_bottom 52
 pnk_footer
