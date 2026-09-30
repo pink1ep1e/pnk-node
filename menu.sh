@@ -62,6 +62,7 @@ show_menu() {
   pnk_menu_item "8" "BBR" "tcp congestion"
   pnk_menu_item "9" "WARP-NATIVE" "WireGuard · wgcf"
   pnk_menu_item "10" "CDN" "nginx LE · /api → :4443"
+  pnk_menu_item "11" "eGames node" "host · selfsteal · version"
   echo
   pnk_menu_item "0" "Выход"
   echo
@@ -181,6 +182,10 @@ while true; do
       ;;
     10)
       pnk_run_peer "$SCRIPT_DIR" "setup-cdn.sh" || true
+      pnk_press_enter
+      ;;
+    11)
+      pnk_run_peer "$SCRIPT_DIR" "setup-egames-node.sh" || true
       pnk_press_enter
       ;;
     0|q|Q)

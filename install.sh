@@ -15,6 +15,7 @@ mkdir -p "$DEST/lib"
 BASE="${PNK_NODE_RAW%/}"
 for f in menu.sh setup-pnknode.sh remove-pnknode.sh security-setup.sh \
          setup-selfsteal.sh setup-bbr.sh setup-warp.sh setup-cdn.sh \
+         setup-egames-node.sh \
          lib/ui.sh lib/common.sh; do
   echo "↓ $f"
   curl -fsSL "$BASE/$f" -o "$DEST/$f"
